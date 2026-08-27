@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Added
+
+- Added a tag-driven GitHub Release workflow that builds a versioned Linux
+  x86_64 tarball, publishes the exact tarball and SHA256 as a CI artifact, and
+  attaches those same files to the matching GitHub Release. The workflow also
+  supports explicit historical-tag backfills without rewriting immutable tags.
+
 ## 0.2.2 - 2026-08-27
 
 ### Fixed

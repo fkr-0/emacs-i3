@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to backfill as a GitHub Release
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag and package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}" >/dev/null
+          package_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          if [[ -z "${package_version}" ]]; then
+            echo 'Unable to determine Cargo package version' >&2
+            exit 1
+          fi
+          if [[ "${package_version}" != "${RELEASE_TAG}" ]]; then
+            if [[ "${GITHUB_EVENT_NAME}" == 'push' ]]; then
+              echo "Tag ${RELEASE_TAG} does not match Cargo version ${package_version}" >&2
+              exit 1
+            fi
+            echo "::warning::Historical tag ${RELEASE_TAG} contains Cargo version ${package_version}; preserving the immutable tag during backfill."
+          fi
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="emacs-i3-${RELEASE_TAG}-linux-x86_64"
+          root="dist/root/${artifact}"
+          mkdir -p "${root}"
+          install -Dm755 target/release/emacs-i3 "${root}/emacs-i3"
+          if [[ -f elisp/emacs-i3.el ]]; then
+            install -Dm644 elisp/emacs-i3.el "${root}/emacs-i3.el"
+          fi
+          for file in README.md README LICENSE CHANGELOG.md MIGRATION.md; do
+            if [[ -f "${file}" ]]; then
+              install -Dm644 "${file}" "${root}/${file}"
+            fi
+          done
+          tar -C dist/root -czf "dist/${artifact}.tar.gz" "${artifact}"
+          (cd dist && sha256sum "${artifact}.tar.gz" > "${artifact}.tar.gz.sha256")
+
+      - name: Smoke test packaged binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="emacs-i3-${RELEASE_TAG}-linux-x86_64"
+          mkdir -p dist/smoke
+          tar -C dist/smoke -xzf "dist/${artifact}.tar.gz"
+          "dist/smoke/${artifact}/emacs-i3" --version
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emacs-i3-${{ env.RELEASE_TAG }}-linux-x86_64
+          path: |
+            dist/emacs-i3-${{ env.RELEASE_TAG }}-linux-x86_64.tar.gz
+            dist/emacs-i3-${{ env.RELEASE_TAG }}-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release create "${RELEASE_TAG}" \
+              --verify-tag \
+              --title "emacs-i3 ${RELEASE_TAG}" \
+              --generate-notes
+          fi
+          gh release upload "${RELEASE_TAG}" \
+            "dist/emacs-i3-${RELEASE_TAG}-linux-x86_64.tar.gz" \
+            "dist/emacs-i3-${RELEASE_TAG}-linux-x86_64.tar.gz.sha256" \
+            --clobber
