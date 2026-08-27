@@ -74,7 +74,17 @@ jobs:
           artifact="emacs-i3-${RELEASE_TAG}-linux-x86_64"
           mkdir -p dist/smoke
           tar -C dist/smoke -xzf "dist/${artifact}.tar.gz"
-          "dist/smoke/${artifact}/emacs-i3" --version
+          binary="dist/smoke/${artifact}/emacs-i3"
+          test -x "${binary}"
+          file "${binary}" | grep -q 'ELF 64-bit'
+          if ldd "${binary}" 2>&1 | grep -q 'not found'; then
+            echo 'Packaged binary has unresolved shared-library dependencies' >&2
+            ldd "${binary}" >&2 || true
+            exit 1
+          fi
+          if [[ "${GITHUB_EVENT_NAME}" == 'push' ]]; then
+            "${binary}" --version | grep -F "${RELEASE_TAG}"
+          fi
 
       - name: Upload CI artifact
         uses: actions/upload-artifact@v4
