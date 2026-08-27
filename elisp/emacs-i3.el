@@ -1,72 +1,146 @@
-(require 'windmove)
-(require 'cl-lib)
+;;; emacs-i3.el --- Route i3-style window commands through Emacs -*- lexical-binding: t; -*-
 
-(defun my/emacs-i3-focus (dir)
-  (let ((other-window (windmove-find-other-window dir)))
-    (if (or (null other-window) (window-minibuffer-p other-window))
-        nil ;; move focus out of emacs
-      (progn (windmove-do-window-select dir) t))))
+;;; Commentary:
+;; Each command returns non-nil only when Emacs handled it.  A caller can then
+;; fall back to i3 whenever no suitable Emacs window or operation exists.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'seq)
+(require 'windmove)
+
+(defgroup emacs-i3 nil
+  "Coordinate Emacs windows with an i3 command bridge."
+  :group 'windows)
+
+(defcustom emacs-i3-skip-minibuffer t
+  "Do not focus or swap with minibuffer windows."
+  :type 'boolean
+  :group 'emacs-i3)
+
+(defvaralias 'my/emacs-i3-skip-minibuffer 'emacs-i3-skip-minibuffer)
+
+(defun emacs-i3--read-direction ()
+  "Read and return a windmove direction symbol."
+  (intern (completing-read "Direction: " '(up down left right) nil t)))
+
+(defun emacs-i3--target-window (direction)
+  "Return the live neighboring window in DIRECTION, or nil."
+  (when (memq direction '(up down left right))
+    (let ((window (windmove-find-other-window direction)))
+      (when (and (window-live-p window)
+                 (or (not emacs-i3-skip-minibuffer)
+                     (not (window-minibuffer-p window))))
+        window))))
+
+(defun my/emacs-i3-focus (direction)
+  "Focus inside Emacs in DIRECTION, or return nil for i3 fallback."
+  (interactive (list (emacs-i3--read-direction)))
+  (let ((origin (selected-window)))
+    (condition-case nil
+        (progn
+          ;; Use Windmove's public selector so side/atomic windows retain its
+          ;; normal semantics instead of selecting a guessed target directly.
+          (windmove-do-window-select direction)
+          (if (and emacs-i3-skip-minibuffer
+                   (window-minibuffer-p (selected-window)))
+              (progn
+                (select-window origin)
+                nil)
+            t))
+      (error
+       (when (window-live-p origin)
+         (select-window origin))
+       nil))))
 
 (defun my/emacs-i3-direction-exists-p (axis)
-  (cl-some (lambda (dir)
-             (let ((win (windmove-find-other-window dir)))
-               (and win (not (window-minibuffer-p win)))))
+  "Return non-nil when AXIS has at least one neighboring Emacs window."
+  (cl-some #'emacs-i3--target-window
            (pcase axis
              ('width '(left right))
-             ('height '(up down)))))
+             ('height '(up down))
+             (_ nil))))
 
-(defun my/emacs-i3-move (dir)
-  (let ((other-window (windmove-find-other-window dir)))
-    (if (and other-window (not (window-minibuffer-p other-window)))
-        (progn (window-swap-states (selected-window) other-window) t)
-      nil)))
+(defun my/emacs-i3-move (direction)
+  "Swap the selected window with its neighbor in DIRECTION."
+  (interactive (list (emacs-i3--read-direction)))
+  (when-let ((window (emacs-i3--target-window direction)))
+    (window-swap-states (selected-window) window)
+    t))
 
-(defun my/emacs-i3-resize (dir axis rest)
-  ;; TODO take REST into account.
-  (if (or (one-window-p)
-          (not (my/emacs-i3-direction-exists-p axis)))
-      nil ;; let i3 resize frame
-    (pcase (list dir axis)
-      ('(shrink width)
-       (shrink-window-horizontally 1))
-      ('(shrink height)
-       (shrink-window 1))
-      ('(grow width)
-       (enlarge-window-horizontally 1))
-      ('(grow height)
-       (enlarge-window 1))
-      (- nil))))
+(defun emacs-i3--resize-amount (arguments)
+  "Return the first positive numeric resize amount in ARGUMENTS."
+  (or (seq-some
+       (lambda (argument)
+         (when (and (stringp argument)
+                    (string-match-p "\\`[0-9]+\\'" argument))
+           (max 1 (string-to-number argument))))
+       arguments)
+      1))
 
-(defun my/emacs-i3-split (dir)
-  "Split window into DIR and move focus to the new window"
-  (if (pcase dir
-        ('h (split-window-right))
-        ('v (split-window-below)))
-      (and (other-window 1) t)))
+(defun my/emacs-i3-resize (direction axis arguments)
+  "Resize the selected window along AXIS in DIRECTION.
+
+ARGUMENTS may contain an i3 pixel or percentage amount; Emacs interprets the
+first positive integer as columns or lines.  Return nil when i3 should handle
+the command instead."
+  (when (and (not (one-window-p))
+             (my/emacs-i3-direction-exists-p axis))
+    (let ((amount (emacs-i3--resize-amount arguments)))
+      (condition-case nil
+          (progn
+            (pcase (list direction axis)
+              (`(shrink width)  (shrink-window-horizontally amount))
+              (`(shrink height) (shrink-window amount))
+              (`(grow width)    (enlarge-window-horizontally amount))
+              (`(grow height)   (enlarge-window amount))
+              (_ (user-error "Unsupported resize command")))
+            t)
+        (error nil)))))
+
+(defun my/emacs-i3-split (direction)
+  "Split in DIRECTION (`h' or `v') and select the new window."
+  (let ((window
+         (pcase direction
+           ((or 'h "h") (split-window-right))
+           ((or 'v "v") (split-window-below))
+           (_ nil))))
+    (when (window-live-p window)
+      (select-window window)
+      t)))
 
 (defun my/emacs-i3-kill ()
-  "Try to kill the focused window. If there is only one window,
-let i3 handle it."
-  (if (one-window-p)
-      nil ;; let i3 kill the main window
-    (progn (delete-window) t)))
+  "Delete the selected Emacs window, or return nil for i3 fallback."
+  (unless (one-window-p)
+    (delete-window)
+    t))
+
+(defun emacs-i3--transpose-layout ()
+  "Transpose the current frame layout when the command is available."
+  (when (fboundp 'transpose-frame)
+    (transpose-frame)
+    t))
 
 (defun my/emacs-i3-command (command)
-  "Try to run an i3 command in Emacs. Returns `t` if the command
-could be run, `nil` if i3 should run it."
-  (pcase (split-string command)
-    (`("focus" ,dir)
-     (my/emacs-i3-focus (intern dir)))
-    (`("move" ,dir)
-     (my/emacs-i3-move (intern dir)))
-    (`("resize" ,dir ,axis . ,rest)
-     (my/emacs-i3-resize (intern dir) (intern axis) rest))
+  "Try to execute i3-style COMMAND inside Emacs.
+
+Return non-nil when Emacs handled the command, otherwise nil so the external
+window manager can process it."
+  (pcase (split-string command nil t)
+    (`("focus" ,direction)
+     (my/emacs-i3-focus (intern direction)))
+    (`("move" ,direction)
+     (my/emacs-i3-move (intern direction)))
+    (`("resize" ,direction ,axis . ,arguments)
+     (my/emacs-i3-resize (intern direction) (intern axis) arguments))
     (`("layout" "toggle" "split")
-     (progn (transpose-frame) t))
-    (`("split" ,dir)
-     (my/emacs-i3-split (intern dir)))
+     (emacs-i3--transpose-layout))
+    (`("split" ,direction)
+     (my/emacs-i3-split direction))
     (`("kill")
      (my/emacs-i3-kill))
-    (- nil)))
+    (_ nil)))
 
 (provide 'emacs-i3)
+;;; emacs-i3.el ends here
