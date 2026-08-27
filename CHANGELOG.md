@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## 0.2.2 - 2026-08-27
+
+### Fixed
+
+- Refreshed the pinned `nixpkgs-unstable` flake input from its 2023 revision to
+  a current 2026 revision so Rust crate fetching uses the modern
+  `static.crates.io` path instead of the stale fetcher that received HTTP 403
+  responses from crates.io.
+
 ## 0.2.1 - 2026-08-27
 
 ### Added
