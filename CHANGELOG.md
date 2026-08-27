@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-27
+
 ### Added
 
 - Added a tag-driven GitHub Release workflow that builds a versioned Linux
