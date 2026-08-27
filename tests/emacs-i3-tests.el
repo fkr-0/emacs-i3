@@ -1,0 +1,82 @@
+;;; emacs-i3-tests.el --- ERT coverage for emacs-i3 -*- lexical-binding: t; -*-
+
+(require 'ert)
+(require 'emacs-i3)
+
+(ert-deftest emacs-i3-resize-amount-prefers-first-number ()
+  (should (= 12 (emacs-i3--resize-amount '("width" "12" "px" "99"))))
+  (should (= 1 (emacs-i3--resize-amount '("width" "px")))))
+
+(ert-deftest emacs-i3-unknown-command-falls-back ()
+  (should-not (my/emacs-i3-command "workspace next")))
+
+(ert-deftest emacs-i3-single-window-kill-falls-back ()
+  (delete-other-windows)
+  (should-not (my/emacs-i3-command "kill")))
+
+(ert-deftest emacs-i3-split-and-kill-round-trip ()
+  (delete-other-windows)
+  (let ((before (length (window-list))))
+    (should (my/emacs-i3-command "split h"))
+    (should (= (1+ before) (length (window-list))))
+    (should (my/emacs-i3-command "kill"))
+    (should (= before (length (window-list))))))
+
+(ert-deftest emacs-i3-focus-selects-neighbor ()
+  (delete-other-windows)
+  (let* ((left (selected-window))
+         (right (split-window-right)))
+    (select-window left)
+    (should (my/emacs-i3-command "focus right"))
+    (should (eq (selected-window) right)))
+  (delete-other-windows))
+
+(ert-deftest emacs-i3-move-swaps-window-state ()
+  (delete-other-windows)
+  (let* ((left (selected-window))
+         (right (split-window-right))
+         (left-buffer (get-buffer-create " *emacs-i3-left*"))
+         (right-buffer (get-buffer-create " *emacs-i3-right*")))
+    (set-window-buffer left left-buffer)
+    (set-window-buffer right right-buffer)
+    (select-window left)
+    (should (my/emacs-i3-command "move right"))
+    (should (eq (window-buffer left) right-buffer))
+    (should (eq (window-buffer right) left-buffer)))
+  (delete-other-windows))
+
+(ert-deftest emacs-i3-resize-changes-window-width ()
+  (delete-other-windows)
+  (let* ((left (selected-window))
+         (_right (split-window-right))
+         (before (window-total-width left)))
+    (select-window left)
+    (should (my/emacs-i3-command "resize grow width 2 px"))
+    (should (> (window-total-width left) before)))
+  (delete-other-windows))
+
+(ert-deftest emacs-i3-layout-toggle-calls-transpose-frame ()
+  (let (called)
+    (cl-letf (((symbol-function 'transpose-frame)
+               (lambda () (setq called t))))
+      (should (my/emacs-i3-command "layout toggle split"))
+      (should called))))
+
+(ert-deftest emacs-i3-invalid-split-falls-back ()
+  (delete-other-windows)
+  (should-not (my/emacs-i3-command "split diagonal"))
+  (should (= 1 (length (window-list)))))
+
+(ert-deftest emacs-i3-target-window-skips-minibuffer ()
+  (let ((emacs-i3-skip-minibuffer t))
+    (cl-letf (((symbol-function 'windmove-find-other-window)
+               (lambda (_direction) (minibuffer-window))))
+      (should-not (emacs-i3--target-window 'down)))))
+
+(ert-deftest emacs-i3-target-window-can-include-minibuffer ()
+  (let ((emacs-i3-skip-minibuffer nil))
+    (cl-letf (((symbol-function 'windmove-find-other-window)
+               (lambda (_direction) (minibuffer-window))))
+      (should (eq (emacs-i3--target-window 'down) (minibuffer-window))))))
+
+;;; emacs-i3-tests.el ends here

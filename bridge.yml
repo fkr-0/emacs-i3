@@ -1,0 +1,32 @@
+version: 1
+name: emacs-i3
+shell: true
+commands:
+  build:
+    run: [cargo, build, --release, --locked]
+    description: Build the optimized emacs-i3 binary.
+    category: build
+  test:
+    run: [bash, tests/run.sh]
+    description: Run Rust, CLI, Clippy, formatting, and Emacs ERT coverage.
+    category: test
+  test-rust:
+    run: [cargo, test, --locked, --all-targets]
+    description: Run Rust unit and CLI integration tests.
+    category: test
+  test-elisp:
+    run: [emacs, --batch, -Q, -L, elisp, -l, tests/emacs-i3-tests.el, -f, ert-run-tests-batch-and-exit]
+    description: Run the Emacs Lisp dispatcher ERT tests.
+    category: test
+  test-e2e:
+    run: [bash, tests/e2e-desktop.sh]
+    description: Run the isolated Xvfb + i3 + Emacs desktop routing qualification.
+    category: test
+  lint:
+    run: [cargo, clippy, --locked, --all-targets, --, -D, warnings]
+    description: Run warning-free Clippy across all Rust targets.
+    category: lint
+  format-check:
+    run: [cargo, fmt, --, --check]
+    description: Verify Rust formatting.
+    category: format

@@ -21,5 +21,9 @@
           in
           all // { default = all.emacs-i3; });
 
+      checks = forAllSystems
+        (system: {
+          package = self.packages.${system}.default;
+        });
     };
 }

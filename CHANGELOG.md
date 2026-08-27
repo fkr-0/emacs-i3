@@ -2,6 +2,59 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+## 0.2.1 - 2026-08-27
+
+### Added
+
+- Added Rust CLI integration tests, direct Unix-socket Emacs protocol tests, and
+  batch ERT coverage for the Emacs Lisp dispatcher.
+- Added a phased feature roadmap covering protocol hardening, diagnostics,
+  typed command handling, isolated desktop E2E qualification, and packaging.
+- Added bounded Emacs IPC with configurable socket and timeout overrides.
+- Added strict TOML configuration for Emacs matching, exact command aliases,
+  tabbed fallback policy, socket selection, and timeout defaults.
+- Added human/JSON read-only diagnostics, verbose route tracing, resolved
+  configuration output, and generated shell completions.
+- Added an isolated Xvfb+i3+Emacs desktop qualification covering split, tabbed,
+  stacked, floating, multi-frame, and fallback/timeout behavior.
+- Added core, Rust-1.85-MSRV, desktop-E2E, and Nix CI lanes plus migration
+  documentation.
+
+### Fixed
+
+- Treat malformed or truncated Emacs server responses as typed protocol errors
+  instead of panicking.
+- Detect focused floating i3 windows and tolerate nameless nodes without
+  panicking during Emacs-window detection.
+- Escape backslashes and control characters when embedding i3 commands in an
+  Emacs Lisp string.
+- Preserve modern i3 window properties such as `machine`; older `i3ipc 0.10.1`
+  discarded the entire property map when that field was present, preventing
+  real Emacs frames from being recognized.
+
+### Changed
+
+- Parse the supported command family into typed Rust operations while keeping
+  unknown commands unchanged for i3 fallback.
+- Modernized the project to Rust edition 2024, Clap 4, and the crates.io
+  `i3ipc-jl` continuation with a Cargo.lock-based reproducible dependency set.
+- Preserved the 0.2.x command-line compatibility contract: existing i3-style
+  commands keep their shape and unknown/unhandled commands continue to fall
+  through to i3 unchanged.
+- Updated public repository/package metadata for the maintained fork while
+  retaining the original upstream project in repository history and README
+  attribution.
+
+### Verification
+
+- Qualified 21 Rust unit tests, 8 CLI integration tests, and 11 Emacs ERT tests,
+  plus the isolated Xvfb+i3+Emacs desktop lane and locked release build.
+- The desktop qualification covers handled Emacs focus, bidirectional i3 edge
+  fallback, tabbed/stacked layouts, floating and multiple Emacs frames, and
+  bounded missing/stale/hung Emacs-server behavior.
+
 ## 0.2.0 - 2026-08-22
 
 ### Added
